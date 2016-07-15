@@ -373,8 +373,47 @@ Total 7 (delta 0), reused 0 (delta 0)
 .br
 To kexec.com:pass-store
 
-.SH FILES
+.SH PASSWORD VAULTS
+A \fBvault\fP is a container for a collection of secrets shared by a group of people.
 
+\fBVaults\fP make it easy to manage the secrets of several separate security domains.
+The user could create one \fBvault\fP for all his private passwords that are encrypted
+against only his own GPG key, while managing all work secrets in another separate
+\fBvault\fP that encrypts against his work key as well as the GPG keys of all his work
+colleagues. Freelancers could maintain one \fBvault\fP per client and so on and so forth.
+
+.SS VAULT SYNOPSIS
+.B pass vault
+[
+.I <vault-name>
+] [
+.I ARGUMENTS
+]
+
+Switch to \fBvault\fP \fI<vault-name>\fP or list all available vaults if omitted.
+
+.SS VAULT ARGUMENTS
+.TP
+.B --init
+Initialize the \fBvaults\fP feature by moving
+.I ~/.password-store
+to
+.I ~/.password-vaults/default
+and then creating a symbolic link
+.I ~/.password-store
+pointing to
+.I ~/.password-vaults/default\fP.
+.TP
+.B --create\fP \fIvault-name\fP
+Create the \fBvault\fP \fIvault-name\fP.
+.TP
+.B --rename\fP \fInew-name\fP
+Rename the currently active vault to \fInew-name\fP.
+.TP
+.B --delete\fP \fIvault-name\fP
+Delete the \fBvault\fP \fIvault-name\fP.
+
+.SH FILES
 .TP
 .B ~/.password-store
 The default password storage directory.
@@ -384,6 +423,10 @@ Contains the default gpg key identification used for encryption and decryption.
 Multiple gpg keys may be specified in this file, one per line. If this file
 exists in any sub directories, passwords inside those sub directories are
 encrypted using those keys. This should be set using the \fBinit\fP command.
+
+.TP
+.B ~/.password-vaults
+The dafault root directory for all vaults.
 
 .SH ENVIRONMENT VARIABLES
 
@@ -419,6 +462,9 @@ Sets the umask of all files modified by pass, by default \fI077\fP.
 .I PASSWORD_STORE_GENERATED_LENGTH
 The default password length if the \fIpass-length\fP parameter to \fBgenerate\fP
 is unspecified.
+.TP
+.I PASSWORD_VAULT_DIR
+Overrides the default location of all vaults.
 .TP
 .I EDITOR
 The location of the text editor used by \fBedit\fP.
