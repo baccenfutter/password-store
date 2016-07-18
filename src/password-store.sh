@@ -13,6 +13,7 @@ which gpg2 &>/dev/null && GPG="gpg2"
 [[ -n $GPG_AGENT_INFO || $GPG == "gpg2" ]] && GPG_OPTS+=( "--batch" "--use-agent" )
 
 PREFIX="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+VAULTS="${PASSWORD_VAULT_DIR:-$HOME/.password-vaults}"
 X_SELECTION="${PASSWORD_STORE_X_SELECTION:-clipboard}"
 CLIP_TIME="${PASSWORD_STORE_CLIP_TIME:-45}"
 GENERATED_LENGTH="${PASSWORD_STORE_GENERATED_LENGTH:-25}"
@@ -118,6 +119,86 @@ check_sneaky_paths() {
 	for path in "$@"; do
 		[[ $path =~ /\.\.$ || $path =~ ^\.\./ || $path =~ /\.\./ || $path =~ ^\.\.$ ]] && die "Error: You've attempted to pass a sneaky path to pass. Go home."
 	done
+}
+
+VAULTS_ERROR_MSG_NOT_INITIALIZED="ERROR: Please run 'pass vault --init, first.'"
+
+are_vaults_enabled() {
+	[[ -d "$VAULTS" ]] && [[ -L "$PREFIX" ]] && [[ $(dirname "$(readlink -e "$PREFIX")") == "$VAULTS" ]] && return 0
+	return 1
+}
+
+initialize_vaults() {
+    are_vaults_enabled && die "ERROR: The vaults feature is already enabled!"
+    echo "Initializing vaults feature! Your vaults are stored unter ~/.password-vault/ from now on."
+	[[ -a "$PREFIX" ]] || die "ERROR: Password-Store not initialized. Please run 'pass init', first."
+	[[ -a "$VAULTS" ]] && die "ERROR: Vaults directory already exists: $VAULTS"
+	mkdir "$VAULTS" || die "ERROR: Can not create vaults directory: $VAULTS"
+	mv "$PREFIX" "$VAULTS/default"
+	ln -s "$VAULTS/default" "$PREFIX"
+}
+
+list_available_vaults() {
+    are_vaults_enabled || die "$VAULTS_ERROR_MSG_NOT_INITIALIZED"
+	local vaults=( $(find "$VAULTS" -maxdepth 1 -type d -printf '%f\n' | tail -n+2) )
+	local current="$(basename "$(readlink "$PREFIX")")"
+	echo "Password-Vaults:"
+	for vault in ${vaults[@]}; do
+		echo -n "- $vault"
+		if [[ "x$vault" == "x$current" ]]; then
+			echo ' *'
+		else
+			echo
+		fi
+	done
+}
+
+create_vault() {
+    are_vaults_enabled || die "$VAULTS_ERROR_MSG_NOT_INITIALIZED"
+	name="$1"
+    cur_vault="$(readlink "$PREFIX")"
+	new_vault="$VAULTS/$name"
+	check_sneaky_paths "$new_vault"
+	[[ -a "$new_vault" ]] && die "ERROR: A vault with this name already exists!"
+	mkdir "$new_vault" || die "ERROR: Can not create vault!"
+	rm -f "$PREFIX"
+	ln -s "$new_vault" "$PREFIX"
+    echo "New vault created. Next run 'pass init <key-id>' to initialize you new vault."
+}
+
+toggle_vaults() {
+    are_vaults_enabled || die "$VAULTS_ERROR_MSG_NOT_INITIALIZED"
+	local name="$1"
+	local vault="$VAULTS/$name"
+	check_sneaky_paths "$vault"
+	[[ -a "$vault" ]] || die "ERROR: Does not exist: $vault"
+	[[ ! "$(readlink "$PREFIX")" == "$name" ]] && rm "$PREFIX" && ln -sf "$vault" "$PREFIX"
+}
+
+rename_vault() {
+    are_vaults_enabled || die "$VAULTS_ERROR_MSG_NOT_INITIALIZED"
+	local new_name="$1"
+	local old_vault="$(readlink "$PREFIX")" new_vault="$VAULTS/$new_name"
+	check_sneaky_paths "$new_vault"
+	[[ -z "$new_name" ]] && die "ERROR: Please provide a name as next shell argument!"
+	[[ -z "$old_vault" ]] && die "ERROR: Can not read: $PREFIX"
+	[[ -a "$vault" ]] && die "ERROR: A vault with this name already exists!"
+	mv "$old_vault" "$new_vault"
+	rm -f "$PREFIX"
+	ln -s "$new_vault" "$PREFIX"
+}
+
+delete_vault() {
+        are_vaults_enabled || die "$VAULTS_ERROR_MSG_NOT_INITIALIZED"
+        local name="$1"
+        local vault="$VAULTS/$name"
+        [[ -z "$name" ]] && die "ERROR: Please provide a name as next shell argument!"
+        [[ -d "$vault" ]] || die "ERROR: This vault does not exist!"
+        [[ "$(readlink "$PREFIX")" == "$vault" ]] && die "Can not delete currently active vault!"
+        echo "Are you sure you want to permanently remove the vault: $name"
+        yesno "This action can not undone!"
+        rm -rf "$vault"
+        echo "Vault deleted."
 }
 
 #
@@ -249,6 +330,9 @@ cmd_usage() {
 	    $PROGRAM git git-command-args...
 	        If the password store is a git repository, execute a git command
 	        specified by git-command-args.
+	    $PROGRAM vault [ [ <vault-name> ] || [ --init , --create <name> , --rename <new-name> , --delete <vault-name> ] ]
+		Make <vault-name> the currently active vault or display a list of all available vaults of omitted.
+		This feature is disable by default and needs to be initialized before using it by invoking --init.
 	    $PROGRAM help
 	        Show this text.
 	    $PROGRAM version
@@ -571,6 +655,37 @@ cmd_git() {
 	fi
 }
 
+cmd_vault() {
+	local opts init=0 create=0 rename=0 delete=0
+	opts="$($GETOPT -o c:r:d: -l init,create:,rename:,delete: -n "$PROGRAM" -- "$@")"
+	local err=$?
+	eval set -- "$opts"
+	while true; do case $1 in
+		--init) init=1; shift;;
+		-c|--create) create=1 new_name="$2"; shift 2;;
+		-r|--rename) rename=1; new_name="$2"; shift 2;;
+                -d|--delete) delete=1; vault_name="$2"; shift 2;;
+		--)shift; break;;
+	esac done
+
+	[[ $err -ne 0 ]] && die "Usage: $PROGRAM $COMMAND [<vault-name>] [--create]"
+
+	local vault="$1"
+	if [[ $init -eq 1 ]]; then
+		initialize_vaults
+	elif [[ $create -eq 1 ]]; then
+		create_vault "$new_name"
+	elif [[ $rename -eq 1 ]]; then
+		rename_vault "$new_name"
+        elif [[ $delete -eq 1 ]]; then
+                delete_vault $vault_name
+	elif [[ "x$vault" == "x" ]]; then
+		list_available_vaults
+	else
+		toggle_vaults "$vault"
+	fi
+}
+
 #
 # END subcommand functions
 #
@@ -592,6 +707,7 @@ case "$1" in
 	rename|mv) shift;		cmd_copy_move "move" "$@" ;;
 	copy|cp) shift;			cmd_copy_move "copy" "$@" ;;
 	git) shift;			cmd_git "$@" ;;
+	vault)shift;			cmd_vault "$@" ;;
 	*) COMMAND="show";		cmd_show "$@" ;;
 esac
 exit 0
